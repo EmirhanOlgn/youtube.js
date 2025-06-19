@@ -1,6 +1,6 @@
 <p align="center"><img src=".github/assets/logo.png" width="200px" alt="logo"/></p>
-<h1 align="center">Randnum Go</h1>
-<p align="center"><strong>Random number guessing game with Go</strong></p>
+<h1 align="center">Youtube.JS</h1>
+<p align="center"><strong>Youtube video download manager</strong></p>
 
 <p align="center">
   <a href="https://opensource.org/licenses/gpl-3.0.html">
