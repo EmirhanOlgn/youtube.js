@@ -1,4 +1,4 @@
-import ytdl from '@distube/ytdl-core'
+import { Ytdl, Quality, parseVideoId } from '@distube/ytdl-core'
 import prompts from 'prompts'
 import cliProgress from 'cli-progress'
 import fs from 'fs'
@@ -7,41 +7,31 @@ import path from 'path'
 import ffmpegPath from 'ffmpeg-static'
 import { spawn } from 'child_process'
 
+const yt = new Ytdl()
 const downloadsDir = path.join(os.homedir(), 'Downloads')
 const bytesToMB = b => (b / 1024 / 1024).toFixed(1)
 const label = f => `${f.qualityLabel || ''} ${f.fps ? f.fps + 'fps' : ''}`.trim()
 
-const getFileSize = async format => {
-    try {
-        const res = await fetch(format.url, { method: 'HEAD' })
-        const size = res.headers.get('content-length')
-        return size ? Number(size) : null
-    } catch {
-        return null
-    }
-}
-
-const downloadWithBar = (url, dest, name) => {
+const downloadWithBar = (info, dest, name, options) => {
     return new Promise((resolve, reject) => {
-        const stream = ytdl(url, { quality: name })
         const bar = new cliProgress.SingleBar({
             format: `${String(name).toUpperCase()} | {bar} {percentage}% | {value}/{total} MB | {speed} MB/s`
         }, cliProgress.Presets.shades_classic)
 
 
-        let downloaded = 0
-        let totalSize = 0
+        let started = false
         const start = Date.now()
 
-        stream.on('response', res => {
-            totalSize = parseInt(res.headers['content-length'], 10)
-            bar.start(bytesToMB(totalSize), 0, { speed: '0.0' })
-        })
-
-        stream.on('data', chunk => {
-            downloaded += chunk.length
-            const speed = bytesToMB(downloaded) / ((Date.now() - start) / 1000)
-            bar.update(bytesToMB(downloaded), { speed: speed.toFixed(2) })
+        const stream = yt.download(info, {
+            ...options,
+            onProgress: ({ downloaded, total }) => {
+                if (!started) {
+                    bar.start(bytesToMB(total || 0), 0, { speed: '0.0' })
+                    started = true
+                }
+                const speed = bytesToMB(downloaded) / ((Date.now() - start) / 1000)
+                bar.update(bytesToMB(downloaded), { speed: speed.toFixed(2) })
+            }
         })
 
         stream.pipe(fs.createWriteStream(dest))
@@ -59,23 +49,20 @@ const main = async () => {
         message: 'Video linkini girin:'
     })
 
-    if (!ytdl.validateURL(url)) {
+    if (!parseVideoId(url || '')) {
         console.error('❌ Geçersiz YouTube URL’i')
         process.exit(1)
     }
 
-    const info = await ytdl.getInfo(url)
+    const info = await yt.getInfo(url)
 
     const formats = info.formats
         .filter(f => f.container === 'mp4' && f.hasVideo && f.height)
         .sort((a, b) => (b.height || 0) - (a.height || 0))
 
-    const enrichedFormats = await Promise.all(formats.map(async (f) => {
-        const size = await getFileSize(f)
-        return {
-            ...f,
-            display: `${label(f)} (${bytesToMB(size || 0)} MB)`
-        }
+    const enrichedFormats = formats.map(f => ({
+        ...f,
+        display: `${label(f)} (${bytesToMB(f.contentLength || 0)} MB)`
     }))
 
     const { choice } = await prompts({
@@ -98,8 +85,11 @@ const main = async () => {
 
     console.log(`\n⬇️  İndirme başlıyor...\n`)
 
-    await downloadWithBar(url, tmpVideo, selected.itag)
-    await downloadWithBar(url, tmpAudio, 'highestaudio')
+    await downloadWithBar(info, tmpVideo, selected.itag, { format: formats[choice] })
+    await downloadWithBar(info, tmpAudio, 'highestaudio', {
+        quality: Quality.HighestAudio,
+        filter: { hasAudio: true, hasVideo: false }
+    })
 
     console.log('\n🎬 FFmpeg ile birleştiriliyor...\n')
 
